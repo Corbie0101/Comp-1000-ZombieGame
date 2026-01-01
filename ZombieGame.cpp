@@ -5,14 +5,18 @@
 #include <ctime>
 using namespace std;
 
-const int WIDTH = 20;
-const int HEIGHT = 20;
+const int WIDTH = 10;
+const int HEIGHT = 10;
 char map[HEIGHT][WIDTH];
 
 char tileUnderPlayer = '.';
 // Player position
 int playerX = 0;
 int playerY = 0;
+int playerHealth = 100;
+int playerScore = 0;
+int zombieDamage = 10;
+bool playerHit = false;
 
 struct Zombie {
     int x;
@@ -25,53 +29,25 @@ vector<Zombie> zombies;
 void initializeMap() {
     for (int i = 0; i < HEIGHT; i++) {
         for (int j = 0; j < WIDTH; j++) {
-            map[i][j] = '.';
+            if (i == 0 || i == HEIGHT - 1 || j == 0 || j == WIDTH - 1) {
+                map[i][j] = '#'; // barrier
+            } else {
+                map[i][j] = '.'; // empty space
+            }
         }
     }
 }
 
-void generateRoads(int roadCount){
-    int placedRoads = 0;
-    while (placedRoads < roadCount)
-    {
-        bool horizontal = rand() % 2;
-        int line = rand() % (horizontal ? HEIGHT : WIDTH);
-        bool canPlace = true;
 
-        // Checks to see if there are buildings or zombies in the way
-        for (int i = 0; i < (horizontal ? WIDTH : HEIGHT); i++)
-        {
-            int x = horizontal ? line : i;
-            int y = horizontal ? i : line;
-
-            if (map[x][y] == 'P' || map[x][y] == 'E' || map[x][y] == 'Z')
-            {
-                canPlace = false;
-                break;
-            }
-        }
-
-        if (canPlace)
-        {
-            for (int i = 0; i < (horizontal ? WIDTH : HEIGHT); i++)
-            {
-                int x = horizontal ? line : i;
-                int y = horizontal ? i : line;
-                map[x][y] = 'R';
-            }
-            placedRoads++;
-        }
-    }
-}
 
 void generateObjects(int zombieCount, int buildingCount) {
     // Place player and exit first so other placements avoid them
-    map[0][0] = 'P';
-    playerX = 0;
-    playerY = 0;
+    map[1][1] = 'P';
+    playerX = 1;
+    playerY = 1;
     tileUnderPlayer = '.'; // starting underlying tile
 
-    map[HEIGHT - 1][WIDTH - 1] = 'E';
+    map[HEIGHT - 2][WIDTH - 2] = 'E';
 
     // Place buildings (only on '.')
     int placedBuildings = 0;
@@ -85,7 +61,19 @@ void generateObjects(int zombieCount, int buildingCount) {
             placedBuildings++;
         }
     }
-
+    //place health packs only on '.' blank spaces
+    int healthPackCount = 4;
+    int placedHealthPacks = 0;
+    while (placedHealthPacks < healthPackCount)
+    {
+        int x = rand() % HEIGHT;
+        int y = rand() % WIDTH;
+        if (map[x][y] == '.')
+        {
+            map[x][y] = 'H';
+            placedHealthPacks++;
+        }
+    }
     // Place zombies (allow spawning on '.' or 'R' but avoid P and E and B)
     int placedZombies = 0;
     while (placedZombies < zombieCount)
@@ -105,6 +93,7 @@ void generateObjects(int zombieCount, int buildingCount) {
         }
     }
 }
+
 
 void printMap() {
     for (int i = 0; i < HEIGHT; i++) {
@@ -126,16 +115,47 @@ void movePlayer(char move) {
 
     char destination = map[newX][newY];
 
+    if (destination == 'H')
+    {
+        int healthGain = 20;
+        playerHealth += healthGain;
+        if (playerHealth > 100)
+        {
+            playerHealth = 100; // Cap health at 100
+        }
+
+        int scoreBonus = 5;
+        playerScore += scoreBonus;
+        cout << "You picked up a health pack! Health +" << healthGain << ", Score +" << scoreBonus << "!" << endl;
+
+        destination = '.'; // Remove health pack from map
+    }
+
+
     // If destination is a building, cancel move
     if (destination == 'B') {
         return;
     }
 
-    // If destination is a zombie -> eaten
+    if (destination == '#') {
+        return;//cannot move into barriers
+    }
+    
     if (destination == 'Z') {
-        cout << "You were eaten by a zombie! Game Over!" << endl;
+        playerHealth -= zombieDamage;
+        cout << "A zombie bites you! Health -" << zombieDamage << "!" << endl;
+        if (playerHealth <= 0) {
+            cout << "You have been eaten by zombies! Game Over!" << endl;
+            exit(0);
+        }
+    }
+    
+    if (playerHealth <= 0)
+    {
+        cout << "You have been eaten by zombies! Game Over!" << endl;
         exit(0);
     }
+    
 
     // If destination is exit -> win
     if (destination == 'E') {
@@ -151,6 +171,8 @@ void movePlayer(char move) {
     playerX = newX;
     playerY = newY;
     map[playerX][playerY] = 'P';
+    playerScore++;
+
 }
 
 void moveZombies()
@@ -184,7 +206,7 @@ void moveZombies()
             if (nx < 0 || nx >= HEIGHT || ny < 0 || ny >= WIDTH) continue;
             char c = map[nx][ny];
             // can't move into buildings or other zombies (current map)
-            if (c == 'B' || c == 'Z') continue;
+            if (c == 'B' || c == 'Z' || c == '#' || c == 'H') continue;
             options.push_back({nx, ny});
         }
 
@@ -197,8 +219,16 @@ void moveZombies()
             int ty = options[idx].second;
             // if moving onto player -> attack immediately
             if (tx == playerX && ty == playerY) {
-                cout << "A zombie caught you! Game Over!" << endl;
-                exit(0);
+                playerHealth -= zombieDamage;
+                cout << "A zombie bites you! Health -" << zombieDamage << "!" << endl;
+                if (playerHealth <= 0) {
+                    cout << "You have been eaten by zombies! Game Over!" << endl;
+                    exit(0);
+                }
+                // stay in place after attack
+                moves.push_back({z.x, z.y, z.x, z.y, (int)i, z.tileUnder});
+                moved = true;
+                break;
             }
             if (!targetTaken[tx][ty]) {
                 // reserve it
@@ -239,11 +269,8 @@ int main() {
     const int durationSeconds = 300; // 5 minutes; change to suit
 
     initializeMap();
-    generateRoads(3); // generates 3 roads on the map
     generateObjects(10, 6);
 
-    // Ensure player is shown on map (generateObjects sets P)
-    map[playerX][playerY] = 'P';
 
     while (true) {
         // compute remaining time
@@ -256,7 +283,12 @@ int main() {
         // print timer header
         int minutes = remaining / 60;
         int seconds = remaining % 60;
-        cout << "Time left: " << minutes << ':' << setw(2) << setfill('0') << seconds << setfill(' ') << '\n';
+        cout << "Time left: " << minutes << ':' << setw(2) << setfill('0') << seconds 
+        << setfill(' ') 
+        << " | Health: " << playerHealth 
+        << " | Score: " << playerScore 
+        << '\n';
+
 
         printMap();
         cout << "Use W/A/S/D to move. Reach E to escape!" << endl;
